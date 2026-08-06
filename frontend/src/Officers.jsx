@@ -21,7 +21,15 @@ const ROLE_STYLE = {
   Officer: { color: COLORS.steel, bg: COLORS.steelDim },
 };
 
-function Officers() {
+function Officers({ onNotify }) {
+  const formatPoint = (point) => {
+    if (!point || point.lat == null || point.lng == null) {
+      return "Pending";
+    }
+
+    return `${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}`;
+  };
+
   const [officers, setOfficers] = useState([]);
 
   const [formData, setFormData] = useState({
@@ -46,7 +54,15 @@ function Officers() {
 
   const addOfficer = async () => {
     try {
-      await axios.post("http://localhost:5000/officers", formData);
+      const res = await axios.post("http://localhost:5000/officers", formData);
+      const createdOfficer = res.data.officer;
+
+      if (createdOfficer?.starting_location) {
+        onNotify?.(
+          `${createdOfficer.full_name} enrolled at ${formatPoint(createdOfficer.starting_location)}`
+        );
+      }
+
       setFormData({
         full_name: "",
         email: "",
@@ -157,6 +173,7 @@ function Officers() {
               <th style={styles.header}>ID</th>
               <th style={styles.header}>Name</th>
               <th style={styles.header}>Email</th>
+              <th style={styles.header}>Start Location</th>
               <th style={styles.header}>Role</th>
               <th style={{ ...styles.header, textAlign: "right" }}>Action</th>
             </tr>
@@ -172,6 +189,9 @@ function Officers() {
                   </td>
                   <td style={styles.cell}>{officer.full_name}</td>
                   <td style={{ ...styles.cell, color: COLORS.textMuted }}>{officer.email}</td>
+                  <td style={{ ...styles.cell, color: COLORS.textMuted, fontFamily: "'IBM Plex Mono', monospace" }}>
+                    {formatPoint(officer.starting_location || officer.location)}
+                  </td>
                   <td style={styles.cell}>
                     <span
                       style={{
@@ -199,7 +219,7 @@ function Officers() {
 
             {officers.length === 0 && (
               <tr>
-                <td style={styles.emptyCell} colSpan={5}>
+                <td style={styles.emptyCell} colSpan={6}>
                   No officers on record.
                 </td>
               </tr>

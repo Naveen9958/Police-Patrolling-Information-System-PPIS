@@ -42,9 +42,18 @@ const SECTION_LABEL = {
 };
 
 function App() {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem("ppis_user");
+      return savedUser ? JSON.parse(savedUser) : null;
+    } catch (err) {
+      console.log(err);
+      return null;
+    }
+  });
   const [page, setPage] = useState("dashboard");
   const [clock, setClock] = useState(new Date());
+  const [notifications, setNotifications] = useState([]);
 
   const [stats, setStats] = useState({
     officers: 0,
@@ -55,6 +64,18 @@ function App() {
   useEffect(() => {
     if (user) {
       loadStats();
+    }
+  }, [user]);
+
+  useEffect(() => {
+    try {
+      if (user) {
+        localStorage.setItem("ppis_user", JSON.stringify(user));
+      } else {
+        localStorage.removeItem("ppis_user");
+      }
+    } catch (err) {
+      console.log(err);
     }
   }, [user]);
 
@@ -71,6 +92,16 @@ function App() {
     } catch (err) {
       console.log(err);
     }
+  };
+
+  const pushNotification = (message) => {
+    const id = `${Date.now()}-${Math.random()}`;
+
+    setNotifications((current) => [{ id, message }, ...current].slice(0, 4));
+
+    setTimeout(() => {
+      setNotifications((current) => current.filter((notification) => notification.id !== id));
+    }, 6000);
   };
 
   if (!user) {
@@ -172,6 +203,16 @@ function App() {
           </div>
         </div>
 
+        {notifications.length > 0 && (
+          <div style={styles.notificationRail}>
+            {notifications.map((notification) => (
+              <div key={notification.id} style={styles.notificationCard}>
+                {notification.message}
+              </div>
+            ))}
+          </div>
+        )}
+
         <div style={styles.content}>
           {page === "dashboard" && (
             <>
@@ -190,10 +231,10 @@ function App() {
             </>
           )}
 
-          {page === "officers" && <Officers />}
-          {page === "checkpoints" && <Checkpoints />}
+          {page === "officers" && <Officers onNotify={pushNotification} />}
+          {page === "checkpoints" && <Checkpoints onNotify={pushNotification} />}
           {page === "patrolLogs" && <PatrolLogs />}
-          {page === "liveMap" && <LiveMap />}
+          {page === "liveMap" && <LiveMap onNotify={pushNotification} />}
         </div>
       </div>
     </div>
@@ -352,6 +393,20 @@ const styles = {
   clockBlock: { textAlign: "right", borderLeft: `1px solid ${COLORS.border}`, paddingLeft: "20px" },
   clockTime: { fontFamily: "'IBM Plex Mono', monospace", fontSize: "16px", color: COLORS.amber, letterSpacing: "1px" },
   clockDate: { fontSize: "10.5px", color: COLORS.textMuted, marginTop: "2px" },
+  notificationRail: {
+    display: "grid",
+    gap: "10px",
+    padding: "18px 30px 0",
+  },
+  notificationCard: {
+    background: "rgba(242,169,59,0.1)",
+    border: "1px solid rgba(242,169,59,0.3)",
+    color: COLORS.text,
+    padding: "10px 14px",
+    borderRadius: "8px",
+    fontSize: "12.5px",
+    lineHeight: 1.4,
+  },
   content: { padding: "30px", overflowY: "auto" },
   pageHeader: { marginBottom: "26px" },
   pageTitle: { fontFamily: "'Oswald', sans-serif", fontSize: "26px", fontWeight: 600, margin: 0, letterSpacing: "0.5px" },
