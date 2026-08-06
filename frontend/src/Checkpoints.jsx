@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import axios from "axios";
+import { MapContainer, Marker, TileLayer, useMapEvents } from "react-leaflet";
+import L from "leaflet";
 
 const COLORS = {
   panel: "#171b21",
@@ -17,9 +19,49 @@ const COLORS = {
   textFaint: "#4d5561",
 };
 
-function Checkpoints() {
+const DEFAULT_PICKER_CENTER = [28.6692, 77.4538];
+
+const pickerPinIcon = L.divIcon({
+  className: "",
+  html: `<div style="
+    width: 16px; height: 16px; border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    background: ${COLORS.amber}; border: 2px solid #12151a;
+    box-shadow: 0 0 0 3px rgba(242,169,59,0.22);
+  "></div>`,
+  iconSize: [16, 16],
+  iconAnchor: [8, 16],
+});
+
+function CheckpointPicker({ selectedPoint, onPick }) {
+  useMapEvents({
+    click(event) {
+      onPick(event.latlng);
+    },
+  });
+
+  if (!selectedPoint) {
+    return null;
+  }
+
+  return (
+    <Marker
+      position={[selectedPoint.lat, selectedPoint.lng]}
+      icon={pickerPinIcon}
+    />
+  );
+}
+
+function Checkpoints({ onNotify }) {
   const [checkpoints, setCheckpoints] = useState([]);
   const [officers, setOfficers] = useState([]);
+  const [locationSuggestions, setLocationSuggestions] = useState([]);
+  const [searchingLocations, setSearchingLocations] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedPoint, setSelectedPoint] = useState(null);
+  const [resolvingPoint, setResolvingPoint] = useState(false);
+  const searchTimerRef = useRef(null);
+  const suppressNextSearchRef = useRef(false);
 
   const [formData, setFormData] = useState({
     checkpoint_name: "",
@@ -49,16 +91,104 @@ function Checkpoints() {
     fetchOfficers();
   }, []);
 
+  useEffect(() => {
+    if (suppressNextSearchRef.current) {
+      suppressNextSearchRef.current = false;
+      return undefined;
+    }
+
+    if (searchTimerRef.current) {
+      clearTimeout(searchTimerRef.current);
+    }
+
+    const query = formData.location.trim();
+
+    if (query.length < 3) {
+      setLocationSuggestions([]);
+      setSearchingLocations(false);
+      return undefined;
+    }
+
+    setSearchingLocations(true);
+
+    searchTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await axios.get("http://localhost:5000/locations/search", {
+          params: { q: query },
+        });
+
+        setLocationSuggestions(res.data.suggestions || []);
+        setShowSuggestions(true);
+      } catch (err) {
+        console.log(err);
+        setLocationSuggestions([]);
+      } finally {
+        setSearchingLocations(false);
+      }
+    }, 350);
+
+    return () => {
+      if (searchTimerRef.current) {
+        clearTimeout(searchTimerRef.current);
+      }
+    };
+  }, [formData.location]);
+
   const addCheckpoint = async () => {
     try {
-      await axios.post("http://localhost:5000/checkpoints", formData);
+      const res = await axios.post("http://localhost:5000/checkpoints", formData);
+      if (res.data.notification) {
+        onNotify?.(res.data.notification);
+      }
       setFormData({
         checkpoint_name: "",
         location: "",
       });
+      setLocationSuggestions([]);
+      setShowSuggestions(false);
       fetchCheckpoints();
     } catch (err) {
       console.log(err);
+    }
+  };
+
+  const selectLocationSuggestion = (suggestion) => {
+    suppressNextSearchRef.current = true;
+    setSelectedPoint({ lat: suggestion.lat, lng: suggestion.lng });
+    setFormData((current) => ({
+      ...current,
+      location: suggestion.label,
+    }));
+    setLocationSuggestions([]);
+    setShowSuggestions(false);
+  };
+
+  const pickLocationFromMap = async ({ lat, lng }) => {
+    suppressNextSearchRef.current = true;
+    setResolvingPoint(true);
+    setSelectedPoint({ lat, lng });
+
+    try {
+      const res = await axios.get("http://localhost:5000/locations/reverse", {
+        params: { lat, lng },
+      });
+
+      setFormData((current) => ({
+        ...current,
+        location: res.data.location.label,
+      }));
+      onNotify?.(`Location selected on map: ${res.data.location.label}`);
+    } catch (err) {
+      console.log(err);
+      setFormData((current) => ({
+        ...current,
+        location: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+      }));
+      onNotify?.("Map pin selected, but the address could not be resolved");
+    } finally {
+      setLocationSuggestions([]);
+      setShowSuggestions(false);
+      setResolvingPoint(false);
     }
   };
 
@@ -73,9 +203,33 @@ function Checkpoints() {
 
   const assignCheckpoint = async (id, officerId) => {
     try {
-      await axios.patch(`http://localhost:5000/checkpoints/${id}/assign`, {
+      const res = await axios.patch(`http://localhost:5000/checkpoints/${id}/assign`, {
         officer_id: officerId || null,
       });
+
+      if (res.data.notification) {
+        onNotify?.(res.data.notification);
+      } else if (officerId) {
+        const assignedOfficer = officers.find((officer) => officer.id === officerId);
+        onNotify?.(
+          `${assignedOfficer?.full_name || "Officer"} assigned to checkpoint ${id}`
+        );
+      }
+
+      fetchCheckpoints();
+    } catch (err) {
+      console.log(err);
+    }
+  };
+
+  const autoAssignCheckpoint = async (id) => {
+    try {
+      const res = await axios.post(`http://localhost:5000/checkpoints/${id}/auto-assign`);
+
+      if (res.data.notification) {
+        onNotify?.(res.data.notification);
+      }
+
       fetchCheckpoints();
     } catch (err) {
       console.log(err);
@@ -116,18 +270,75 @@ function Checkpoints() {
             }
           />
 
-          <input
-            className="ppis-input"
-            style={styles.input}
-            placeholder="Location"
-            value={formData.location}
-            onChange={(e) =>
-              setFormData({
-                ...formData,
-                location: e.target.value,
-              })
-            }
-          />
+          <div style={styles.locationFieldWrap}>
+            <input
+              className="ppis-input"
+              style={styles.input}
+              placeholder="Search landmark, address, city, or area"
+              value={formData.location}
+              onFocus={() => {
+                if (locationSuggestions.length > 0) {
+                  setShowSuggestions(true);
+                }
+              }}
+              onChange={(e) =>
+                  {
+                    setSelectedPoint(null);
+                    setFormData({
+                      ...formData,
+                      location: e.target.value,
+                    });
+                  }
+              }
+            />
+
+            {showSuggestions && (locationSuggestions.length > 0 || searchingLocations) && (
+              <div style={styles.suggestionPanel}>
+                {searchingLocations && <div style={styles.suggestionStatus}>Searching locations…</div>}
+
+                {!searchingLocations &&
+                  locationSuggestions.map((suggestion) => (
+                    <button
+                      key={`${suggestion.lat}-${suggestion.lng}`}
+                      type="button"
+                      style={styles.suggestionItem}
+                      onClick={() => selectLocationSuggestion(suggestion)}
+                    >
+                      <span style={styles.suggestionLabel}>{suggestion.label}</span>
+                      <span style={styles.suggestionCoords}>
+                        {suggestion.lat.toFixed(4)}, {suggestion.lng.toFixed(4)}
+                      </span>
+                    </button>
+                  ))}
+
+                {!searchingLocations && locationSuggestions.length === 0 && queryLengthHint(formData.location) && (
+                  <div style={styles.suggestionStatus}>No matches found. Try a more specific address.</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div style={styles.mapPickerWrap}>
+            <div style={styles.mapPickerHeader}>
+              <span>Click on the map to pin a location</span>
+              <span style={styles.mapPickerHint}>
+                {resolvingPoint ? "Resolving address…" : "Pin will fill the field automatically"}
+              </span>
+            </div>
+
+            <MapContainer
+              center={selectedPoint ? [selectedPoint.lat, selectedPoint.lng] : DEFAULT_PICKER_CENTER}
+              zoom={13}
+              scrollWheelZoom={false}
+              style={styles.mapPicker}
+            >
+              <TileLayer
+                attribution='&copy; OpenStreetMap contributors'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              <CheckpointPicker selectedPoint={selectedPoint} onPick={pickLocationFromMap} />
+            </MapContainer>
+          </div>
 
           <button className="ppis-add-btn" style={styles.addButton} onClick={addCheckpoint}>
             + Deploy Checkpoint
@@ -192,6 +403,13 @@ function Checkpoints() {
 
                 <td style={{ ...styles.cell, textAlign: "right" }}>
                   <button
+                    className="ppis-add-btn"
+                    style={{ ...styles.actionButton, marginRight: "10px" }}
+                    onClick={() => autoAssignCheckpoint(checkpoint.id)}
+                  >
+                    Auto Assign
+                  </button>
+                  <button
                     className="ppis-del-btn"
                     style={styles.deleteButton}
                     onClick={() => deleteCheckpoint(checkpoint.id)}
@@ -251,6 +469,12 @@ const styles = {
     display: "flex",
     gap: "12px",
     flexWrap: "wrap",
+    alignItems: "flex-start",
+  },
+  locationFieldWrap: {
+    position: "relative",
+    flex: "1 1 240px",
+    minWidth: "240px",
   },
   input: {
     background: COLORS.panelAlt,
@@ -261,8 +485,75 @@ const styles = {
     fontSize: "13.5px",
     fontFamily: "'Inter', sans-serif",
     minWidth: "200px",
-    flex: "1 1 200px",
+    width: "100%",
     transition: "border-color 0.15s ease",
+  },
+  suggestionPanel: {
+    position: "absolute",
+    top: "calc(100% + 8px)",
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    background: COLORS.panel,
+    border: `1px solid ${COLORS.border}`,
+    borderRadius: "10px",
+    overflow: "hidden",
+    boxShadow: "0 18px 36px rgba(0,0,0,0.32)",
+  },
+  suggestionItem: {
+    width: "100%",
+    textAlign: "left",
+    background: "transparent",
+    border: "none",
+    borderBottom: `1px solid ${COLORS.border}`,
+    padding: "12px 14px",
+    cursor: "pointer",
+    color: COLORS.text,
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+  },
+  suggestionLabel: {
+    fontSize: "12.8px",
+    fontWeight: 600,
+    lineHeight: 1.35,
+  },
+  suggestionCoords: {
+    fontSize: "11px",
+    color: COLORS.textFaint,
+    fontFamily: "'IBM Plex Mono', monospace",
+  },
+  suggestionStatus: {
+    padding: "12px 14px",
+    color: COLORS.textMuted,
+    fontSize: "12px",
+  },
+  mapPickerWrap: {
+    width: "100%",
+    marginTop: "4px",
+    borderRadius: "10px",
+    border: `1px solid ${COLORS.border}`,
+    overflow: "hidden",
+    background: COLORS.panelAlt,
+  },
+  mapPickerHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+    padding: "10px 14px",
+    fontSize: "11.5px",
+    color: COLORS.textMuted,
+    borderBottom: `1px solid ${COLORS.border}`,
+  },
+  mapPickerHint: {
+    color: COLORS.textFaint,
+    fontFamily: "'IBM Plex Mono', monospace",
+    fontSize: "10.5px",
+  },
+  mapPicker: {
+    height: "220px",
+    width: "100%",
   },
   addButton: {
     background: COLORS.amber,
@@ -343,6 +634,17 @@ const styles = {
     fontWeight: 600,
     transition: "background 0.15s ease",
   },
+  actionButton: {
+    background: COLORS.greenDim,
+    border: `1px solid ${COLORS.green}`,
+    padding: "7px 14px",
+    borderRadius: "6px",
+    cursor: "pointer",
+    color: COLORS.green,
+    fontSize: "12px",
+    fontWeight: 600,
+    transition: "background 0.15s ease",
+  },
   emptyCell: {
     padding: "28px 18px",
     textAlign: "center",
@@ -350,5 +652,9 @@ const styles = {
     fontSize: "13px",
   },
 };
+
+function queryLengthHint(value) {
+  return value.trim().length >= 3;
+}
 
 export default Checkpoints;

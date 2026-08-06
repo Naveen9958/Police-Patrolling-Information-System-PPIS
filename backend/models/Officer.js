@@ -28,6 +28,10 @@ const officerSchema = new mongoose.Schema(
       lat: { type: Number, default: null },
       lng: { type: Number, default: null },
     },
+    starting_location: {
+      lat: { type: Number, default: null },
+      lng: { type: Number, default: null },
+    },
     location_updated_at: {
       type: Date,
       default: null,

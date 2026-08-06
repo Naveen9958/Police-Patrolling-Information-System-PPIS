@@ -10,6 +10,10 @@ const checkpointSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    coordinates: {
+      lat: { type: Number, default: null },
+      lng: { type: Number, default: null },
+    },
     assigned_officer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Officer",
