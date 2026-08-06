@@ -20,6 +20,7 @@ function Login({ onLogin }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false); // Yeh line add karein
 
   const handleLogin = async () => {
     setError("");
@@ -97,15 +98,32 @@ function Login({ onLogin }) {
           style={styles.input}
         />
 
-        <input
-          className="ppis-login-input"
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={handleKeyDown}
-          style={styles.input}
-        />
+        <div style={{ position: "relative" }}>
+  <input
+    className="ppis-login-input"
+    type={showPassword ? "text" : "password"} // Condition yahan check hogi
+    placeholder="Password"
+    value={password}
+    onChange={(e) => setPassword(e.target.value)}
+    onKeyDown={handleKeyDown}
+    style={{ ...styles.input, paddingRight: "40px" }} // Icon ke liye right mein space
+  />
+  <span
+    onClick={() => setShowPassword(!showPassword)}
+    style={{
+      position: "absolute",
+      right: "12px",
+      top: "50%",
+      transform: "translateY(-50%)",
+      cursor: "pointer",
+      color: COLORS.textMuted, // Aapke theme ke hisaab se color
+      fontSize: "16px",
+      userSelect: "none"
+    }}
+  >
+    {showPassword ? "🙈" : "👁️"}
+  </span>
+</div>
 
         <button
           className="ppis-login-btn"
