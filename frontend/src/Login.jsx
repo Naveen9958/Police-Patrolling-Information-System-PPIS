@@ -60,7 +60,7 @@ function Login({ onLogin }) {
 
       <div style={styles.card}>
         <div style={styles.header}>
-          <div style={styles.badge}>🚔</div>
+          <div style={styles.badge}>🚨</div>
           <h1 style={styles.title}>PPIS</h1>
           <p style={styles.subtitle}>Police Patrol &amp; Incident System</p>
         </div>
